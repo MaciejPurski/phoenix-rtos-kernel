@@ -30,6 +30,7 @@
 _start:
 	cmpl $MULTIBOOT_INFO_MAGIC, %eax
 	jne _init_plo
+	/* Ten fragment tylko dla qemu */
 
 	/* setup initial kernel stack (one page) */
 	movl $(multiboot_common + SIZE_PAGE), %esp
@@ -43,6 +44,7 @@ _start:
 	jmp _init_setupPaging
 
 _init_plo:
+	/* SEL_KDATA - selektor segmentu danych kernela */
 	movw $SEL_KDATA, %ax
 	movw %ax, %ss
 	movw %ax, %ds
@@ -57,13 +59,13 @@ _init_plo:
 	movl (%eax), %esi
 
 	/* Disable A20 line mask */
-	call _init_empty8042
-	movb $0xd1, %al
-	outb %al, $0x64
-	call _init_empty8042
-	movb $0xdf, %al
-	outb %al, $0x60
-	call _init_empty8042
+	; call _init_empty8042
+	; movb $0xd1, %al
+	; outb %al, $0x64
+	; call _init_empty8042
+	; movb $0xdf, %al
+	; outb %al, $0x60
+	; call _init_empty8042
 
 _init_setupPaging:
 
@@ -234,6 +236,7 @@ _init_empty8042:
 .globl _init_core
 .type _init_core, @function
 _init_core:
+	/* Wyłączenie przerwań */
 	cli
 	/* mov ax, #0xfff */
 	.byte 0xb8, 0xff, 0x0f
@@ -262,10 +265,15 @@ _init_core:
 	/* push eax */
 	.byte 0x66, 0x50
 
+	/* Print letter F */
 	movl $0x3f8, %edx
 	movb $70, %al
+	/* adresy w pamięci */
+	/* 0xB800 - w trybie chronionym*/
+	/* 0xB8000 - w trybie chronionym*/
 	outb %al, %dx
 
+	/* Przejście do trybu chronionego */
 	/* mov eax, cr0 */
 	.byte 0x0f, 0x20, 0xc0
 
@@ -285,8 +293,17 @@ _init_core_prot:
 	movw %ax, %fs
 	movw %ax, %gs
 
+	/* Print letter D to serial 0x3f8 */
 	movl $0x3f8, %edx
 	movb $68, %al
+	outb %al, %dx
+
+	movw $68, (0xB8000)
+	/* 0xB8000 - w trybie chronionym*/
+
+	/* Print letter A */
+	movl $0x3f8, %edx
+	movb $65, %al
 	outb %al, %dx
 
 	/* Initialize virtual memory */
