@@ -665,6 +665,20 @@ extern unsigned int hal_cpuGetCount(void);
 
 
 
+static inline u8 getCpuID(void)
+{
+	u8 cpuid;
+		__asm__ volatile(" \
+		movl (0xfee00020), %%eax; \
+		shrl $24, %%eax; \
+		movb %%al, %0;"
+		: "=g" (cpuid) \
+		: \
+		: "%eax");
+
+	return cpuid;
+}
+
 static inline unsigned int hal_cpuGetID(void)
 {
 	return 0;

@@ -50,6 +50,7 @@ extern void _interrupts_syscall(void);
 
 #define SIZE_INTERRUPTS 16
 
+#define IOAPIC
 
 #define _intr_add(list, t) \
 	do { \
@@ -97,6 +98,7 @@ void _interrupts_apicACK(unsigned int n)
 	if (n >= SIZE_INTERRUPTS)
 		return;
 
+#ifndef IOAPIC
 	if (n < 8) {
 		hal_outb((void *)0x20, 0x60 | n);
 	}
@@ -104,6 +106,10 @@ void _interrupts_apicACK(unsigned int n)
 		hal_outb((void *)0x20, 0x62);
 		hal_outb((void *)0xa0, 0x60 | (n - 8));
 	}
+#else
+	/* Write to Local APIC EOI register */
+	*((u32 *) 0xFEE000B0) = 0;
+#endif
 	return;
 }
 
@@ -111,6 +117,10 @@ int interrupts_dispatchIRQ(unsigned int n, cpu_context_t *ctx)
 {
 	intr_handler_t *h;
 	int reschedule = 0;
+
+	//if (n == 0)
+	//	lib_printf("IRQ: %d CPU: %x\n", n, getCpuID());
+	
 
 	if (n >= SIZE_INTERRUPTS)
 		return 0;
@@ -182,11 +192,95 @@ __attribute__ ((section (".init"))) int _interrupts_setIDTEntry(unsigned int n, 
 	return EOK;
 }
 
+#define IOREGSEL 0xfec00000
+#define IOWIN 0xfec00010
+
+#define IOAPIC_RET_OFF 0x10
+
+#define IOAPIC_DELMOD_FIXED 0x00 << 8
+#define IOAPIC_DELMOD_LOWEST_PRIORITY 0x01 << 8
+
+#define IOAPIC_DESTMOD_PHY 0x0
+#define IOAPIC_DESTMOD_LOG 0x1 << 11
+
+#define IOAPIC_INTMASK 0x1 << 16
+
+void io_apic_read(void)
+{
+	*((u8 *) IOREGSEL) = 0;
+	lib_printf("io apic id: %x\n", *((u32 *) IOWIN));
+}
+
+u32 io_apic_version(void)
+{
+	u32 version_reg = 0;
+	*((u8 *) IOREGSEL) = 1;
+	version_reg = *((u32 *) IOWIN);
+	lib_printf("io apic version_register: %x\n", version_reg);
+
+	return version_reg;
+}
+
+void io_apic_write_id(u8 id)
+{
+	*((u8 *) IOREGSEL) = 0;
+	*((u32 *) IOWIN) = id << 24;
+}
+
+void io_apic_write_ret(u8 index, u64 val)
+{
+	u32 offset = IOAPIC_RET_OFF + 2 * index + 1;
+	u32 higher = (u32) (val >> 32) & 0xffffffff;
+	u32 lower = (u32) val & 0xffffffff;
+
+	lib_printf("offset: %x, higher: %x, lower: %x\n", offset, higher, lower);
+	__asm__ volatile(" \
+		movl %0, (0xfec00000); \
+		movl %1, (0xfec00010); \
+		decl %0; \
+		movl %0, (0xfec00000); \
+		movl %2, (0xfec00010);"
+		: \
+		: "r" (offset), "r" (higher), "r" (lower)\
+		:);
+
+
+	// *((u8 *) IOREGSEL) = offset + 1;
+	// *((u32 *) IOWIN) = (u32) (val >> 32);
+
+	// while (*((u32 *) IOWIN) != (u32) (val >> 32)) {lib_printf("w");};
+
+	// *((u8 *) IOREGSEL) = offset;
+	// *((u32 *) IOWIN) = (u32) val;
+
+	// while (*((u32 *) IOWIN) != (u32) (val)) {};
+
+}
+
+u64 io_apic_read_ret(u8 index)
+{
+	u8 offset = IOAPIC_RET_OFF + 2 * index;
+	u32 result = 0;
+
+	*((u8 *) IOREGSEL) = offset;
+	result = *((u32 *) IOWIN);
+
+	lib_printf("i: %d val: %08X ", index, result);
+
+	*((u8 *) IOREGSEL) = offset + 1;
+	result = *((u32 *) IOWIN);
+	lib_printf("%08X\n", result);
+
+	return result;
+}
+
+
 
 __attribute__ ((section (".init"))) void _hal_interruptsInit(void)
 {
 	unsigned int k;
 
+#ifndef IOAPIC
 	/* Initialize interrupt controllers (8259A) */
 	hal_outb((void *)0x20, 0x11);  /* ICW1 */
 	hal_outb((void *)0x21, 0x20);  /* ICW2 (Master) */
@@ -197,6 +291,65 @@ __attribute__ ((section (".init"))) void _hal_interruptsInit(void)
 	hal_outb((void *)0xa1, 0x28);  /* ICW2 (Slave) */
 	hal_outb((void *)0xa1, 0x02);  /* ICW3 (Slave) */
 	hal_outb((void *)0xa1, 0x01);  /* ICW4 (Slave) */
+#else
+	/* Disable 8259A */
+	hal_outb((void *) 0xa1, 0xff);
+	hal_outb((void *) 0x21, 0xff);
+
+	/* Enable IMCR Register */
+	hal_outb((void *) 0x22,0x70);
+    hal_outb((void *) 0x23,0x01);
+
+	u32 spurious_reg = 0;
+	__asm__ volatile(" \
+		movl (0xfee000f0), %%eax; \
+		movl %%eax, %0;"
+		: "=g" (spurious_reg) \
+		: \
+		: "%eax");
+
+
+	u64 apic_msr = hal_rdmsr(0x1b);
+	lib_printf("APIC MSR: %x\n", apic_msr);
+	lib_printf("APIC is BSP: %x\n", (apic_msr >> 8) & 1);
+	lib_printf("APIC is enabled: %x\n", (apic_msr >> 11) & 1);
+
+	lib_printf("APIC spurious reg: %x\n", spurious_reg);
+	u32 ver_reg = io_apic_version();
+	io_apic_write_id(8);
+
+
+
+	u8 max_entry = (ver_reg >> 16) & 0xff;
+	u8 apic_ver = ver_reg & 0xff;
+	lib_printf("Max entry: %d Version: %d\n", max_entry, apic_ver);
+
+
+	unsigned int i;
+	for (i = 0; i < 16; i++) {
+		io_apic_write_ret(i,
+						 IOAPIC_INTMASK |
+						 IOAPIC_DESTMOD_PHY |
+						 IOAPIC_DELMOD_FIXED |
+						 (32 + i)); /* Interrupt Vector */
+	}
+
+	/* Unmask clock interrupt */
+	io_apic_write_ret(2, IOAPIC_DESTMOD_PHY |
+						 IOAPIC_DELMOD_FIXED |
+						 (32 + 0)); /* Interrupt Vector */
+
+	/* Unmask COM1 interrupt */
+	io_apic_write_ret(4, IOAPIC_DESTMOD_PHY |
+						 IOAPIC_DELMOD_FIXED |
+						 (32 + 4)); /* Interrupt Vector */
+
+	io_apic_read();
+
+	for (i = 0; i < 16; i++) {
+		io_apic_read_ret(i);
+	}
+#endif
 
 	/* Set stubs for hardware interrupts */
 	_interrupts_setIDTEntry(32 + 0,  _interrupts_irq0, IGBITS_IRQEXC);

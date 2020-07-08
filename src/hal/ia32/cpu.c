@@ -22,6 +22,7 @@
 #include "string.h"
 #include "pmap.h"
 #include "spinlock.h"
+#include "lib/lib.h"
 
 
 extern int threads_schedule(unsigned int n, cpu_context_t *context, void *arg);
@@ -360,6 +361,8 @@ void _cpu_initCore(void)
 {
 	cpu.ncpus++;
 
+	lib_printf("ncpus: %d cpuid: %x\n", cpu.ncpus, getCpuID());
+
 	hal_memset(&cpu.tss[hal_cpuGetID()], 0, sizeof(tss_t));
 
 	_cpu_gdtInsert(4 + cpu.ncpus, (u32)&cpu.tss[hal_cpuGetID()], sizeof(tss_t), DESCR_TSS);
@@ -399,6 +402,203 @@ void _hal_cpuInitCores(void)
 	}
 }
 
+/* This table is obligatory if the system is MP */
+struct {
+	char signature[4]; /* Equal to _MP_ */
+	addr_t mp_table_pointer; /* Physical address of MP Table */
+	u8 length; /* Length of table in 16-byte units */
+	u8 spec_rev; /* Version number of the MP specification */
+	u8 checksum; /* Checksum of the complete pointer structure */
+	u8 mp_feature_information[5]; /* When 0 byte is equal to 0,
+									the MP configuration is present.
+									Otherwise, it indicates, which default
+									MP configuration is used.
+
+									Bit 7 if set, means that IMCR is present
+									and PIC Mode is implemented. Otherwise,
+									Virtual Wire Mode is implemented */
+
+
+} mp_floating_pointer_struct;
+
+
+
+
+addr_t find_mp_floating_table(void)
+{
+	/* Search in BIOS ROM */
+	char *current = 0x0F0000;
+	char *max_addr = 0x0FFFFF;
+
+	for (; current+4 < max_addr; current++) {
+		if (*(current) == '_' &&
+			*(current + 1) == 'M' &&
+			*(current + 2) == 'P' &&
+			*(current + 3) == '_') {
+				lib_printf("FOUND: %p\n", current);
+				return current;
+			}
+	}
+
+	lib_printf("NOT FOUND\n");
+
+	return 0;
+}
+
+struct {
+	char signature[4]; /* Equal to PCMP */
+	u16 base_table_length;
+	u8 spec_rev;
+	u8 checksum;
+	char oem_id[8];
+	char product_id[12];
+	addr_t oem_table_pointer;
+	u16 oem_table_size;
+	u16 entry_count;
+	addr_t local_apic_address;
+	u16 ex_table_length;
+	u8 ex_table_checksum;
+} mp_table_header;
+
+
+typedef struct {
+	u8 id;
+	u8 ver;
+	u8 flags;
+	u32 ioapic_address;
+} io_apic_entry_t;
+
+
+addr_t parse_mp_floating_table(addr_t address)
+{
+	hal_memcpy(&mp_floating_pointer_struct, (void *) address, sizeof(mp_floating_pointer_struct));
+	lib_printf("MP Floating table:\n");
+	lib_printf("signature: %c\n", mp_floating_pointer_struct.signature[3]);
+	lib_printf("physical address: %x\n", mp_floating_pointer_struct.mp_table_pointer);
+	lib_printf("length: %d\n", mp_floating_pointer_struct.length);
+	lib_printf("spec_rev: %d\n", mp_floating_pointer_struct.spec_rev);
+	lib_printf("checksum: %d\n", mp_floating_pointer_struct.checksum);
+	lib_printf("feature byte 1: %d\n", mp_floating_pointer_struct.mp_feature_information[0]);
+	lib_printf("feature byte 2: %d\n", mp_floating_pointer_struct.mp_feature_information[1]);
+
+	return mp_floating_pointer_struct.mp_table_pointer;
+}
+
+
+addr_t parse_mp_table_header(addr_t address)
+{
+	hal_memcpy(&mp_table_header, (void *) address, sizeof(mp_table_header));
+
+	lib_printf("MP Floating header:\n");
+	lib_printf("signature: %c\n", mp_table_header.signature[3]);
+	lib_printf("base_table_length: %d\n", mp_table_header.base_table_length);
+	lib_printf("spec_rev: %d\n", mp_table_header.spec_rev);
+	lib_printf("checksum: %d\n", mp_table_header.checksum);
+	lib_printf("oemid: %.8s\n", mp_table_header.oem_id);
+	lib_printf("productid: %.16s\n", mp_table_header.product_id);
+	lib_printf("oem table pointer: %x\n", mp_table_header.oem_table_pointer);
+	lib_printf("oem table size: %d\n", mp_table_header.oem_table_size);
+	lib_printf("entry count: %d\n", mp_table_header.entry_count);
+	lib_printf("local apic address: %x\n", mp_table_header.local_apic_address);
+	lib_printf("extended table length: %d\n", mp_table_header.ex_table_length);
+	lib_printf("extended table checksum: %d\n", mp_table_header.ex_table_checksum);
+
+	return mp_table_header.entry_count;
+}
+
+
+#define MP_TABLE_ENTRY_PROC 0
+#define MP_TABLE_ENTRY_BUS 1
+#define MP_TABLE_ENTRY_IOAPIC 2
+#define MP_TABLE_ENTRY_IOINT 3
+#define MP_TABLE_ENTRY_LINT 4
+
+#define INT_TYPE_INT 0
+#define INT_TYPE_NMI 1
+#define INT_TYPE_SMI 2
+#define INT_TYPE_EXTINT 3
+
+
+void parse_mp_table_entries(addr_t address, u16 n_entries)
+{
+	u16 i;
+	for (i = 0; i < n_entries; i++) {
+		u8 entry_type = *((u8 *) address);
+
+		lib_printf("ENTRY TYPE: %d\n", entry_type);
+
+		switch (entry_type) {
+			case MP_TABLE_ENTRY_PROC:
+				address += 20;
+				break;
+
+			case MP_TABLE_ENTRY_BUS:
+				lib_printf("\nBUS ENTRY\n");
+				address++;
+				lib_printf("BUS ID: %x\n", *((u8 *) address));
+				address++;
+				char bus_type[7];
+				hal_memcpy(bus_type, (void *) address, 6);
+				bus_type[6] = '\0';
+				lib_printf("BUS TYPE: %s\n", bus_type);
+				address += 6;
+				break;
+
+			case MP_TABLE_ENTRY_IOAPIC:
+				lib_printf("\nI/O APIC ENTRY\n");
+				address++;
+				lib_printf("I/O APIC ID: %x\n", *((u8 *) address));
+				address++;
+				lib_printf("I/O APIC VERSION: %x\n", *((u8 *) address));
+				address++;
+				lib_printf("I/O APIC EN: %x\n", *((u8 *) address) & 0x1);
+				address++;
+				lib_printf("I/O APIC BASE ADDRESS: %x\n\n", *((u32 *) address));
+				address += 4;
+				break;
+
+			case MP_TABLE_ENTRY_IOINT:
+				lib_printf("\nI/O APIC ASSIGNMENT ENTRY\n");
+				address++;
+				lib_printf("INTERRUPT TYPE: %x\n", *((u8 *) address));
+				address++;
+				lib_printf("Polarity: %x\n", *((u8 *) address) & 0x3);
+				lib_printf("Trigger mode: %x\n", (*((u8 *) address) >> 2) & 0x3);
+				address += 2;
+				lib_printf("Source bus ID: %x\n", *((u8 *) address));
+				address++;
+				lib_printf("Source bus IRQ: %x\n", *((u8 *) address));
+				address++;
+				lib_printf("Destination I/O APIC: %x\n", *((u8 *) address));
+				address++;
+				lib_printf("Destination I/O APIC INTIN: %x\n", *((u8 *) address));
+				address++;
+				break;
+
+			case MP_TABLE_ENTRY_LINT:
+				address++;
+				lib_printf("\nLOCAL APIC ASSIGNMENT ENTRY\n");
+				lib_printf("INTERRUPT TYPE: %x\n", *((u8 *) address));
+				address++;
+				lib_printf("Polarity: %x\n", *((u8 *) address) & 0x3);
+				lib_printf("Trigger mode: %x\n", (*((u8 *) address) >> 2) & 0x3);
+				address += 2;
+				lib_printf("Source bus ID: %x\n", *((u8 *) address));
+				address++;
+				lib_printf("Source bus IRQ: %x\n", *((u8 *) address));
+				address++;
+				lib_printf("Destination local APIC: %x\n", *((u8 *) address));
+				address++;
+				lib_printf("Destination local APIC LINTIN: %x\n", *((u8 *) address));
+				address++;
+				break;
+
+			default:
+				return;
+		}
+	}	
+}
+
 
 char *hal_cpuInfo(char *info)
 {
@@ -433,6 +633,19 @@ char *hal_cpuInfo(char *info)
 	i += hal_i2s(", cores=", &info[i], cpu.ncpus, 10, 0);
 
 	info[i] = 0;
+
+	addr_t mp_floating_table = find_mp_floating_table();
+	if (mp_floating_table) {
+		addr_t mp_table_addr = parse_mp_floating_table(mp_floating_table);
+
+		if (mp_table_addr) {
+			parse_mp_table_header(mp_table_addr);
+
+			parse_mp_table_entries(mp_table_addr + sizeof(mp_table_header),
+								   mp_table_header.entry_count);
+		}
+		
+	}
 
 	return info;
 }

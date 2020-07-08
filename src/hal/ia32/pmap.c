@@ -52,7 +52,7 @@ int pmap_create(pmap_t *pmap, pmap_t *kpmap, page_t *p, void *vaddr)
 	hal_memset(pmap->pdir, 0, 4096);
 	vaddr = (void *)((VADDR_KERNEL + SIZE_PAGE) & ~(SIZE_PAGE - 1));
 
-	pages = (kpmap->end - vaddr) / (SIZE_PAGE << 10);
+	pages = ((void *) 0xffffffff - vaddr) / (SIZE_PAGE << 10);
 	for (i = 0; i < pages; vaddr += (SIZE_PAGE << 10), ++i)
 		pmap->pdir[(u32) vaddr >> 22] = kpmap->pdir[(u32) vaddr >> 22];
 
