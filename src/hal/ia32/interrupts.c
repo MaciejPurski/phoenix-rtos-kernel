@@ -108,9 +108,66 @@ void _interrupts_apicACK(unsigned int n)
 	}
 #else
 	/* Write to Local APIC EOI register */
-	*((u32 *) 0xFEE000B0) = 0;
+	*((volatile u32 *) 0xFEE000B0) = 0;
+	//lib_printf("ACK IRQ: %x CPU: %x\n", n, getCpuID());
+
 #endif
 	return;
+}
+
+#define IOREGSEL 0xfec00000
+#define IOWIN 0xfec00010
+
+#define IOAPIC_RET_OFF 0x10
+
+#define IOAPIC_DELMOD_FIXED 0x00 << 8
+#define IOAPIC_DELMOD_LOWEST_PRIORITY 0x01 << 8
+
+#define IOAPIC_DESTMOD_PHY 0x0
+#define IOAPIC_DESTMOD_LOG 0x1 << 11
+
+#define IOAPIC_INTMASK 0x1 << 16
+
+void io_apic_write_ret2(u8 index, u32 higher, u32 lower)
+{
+	u32 offset = IOAPIC_RET_OFF + 2 * index + 1;
+	__asm__ volatile(" \
+		movl %0, (0xfec00000); \
+		movl %1, (0xfec00010); \
+		decl %0; \
+		movl %0, (0xfec00000); \
+		movl %2, (0xfec00010);"
+		: \
+		: "r" (offset), "r" (higher), "r" (lower)\
+		:);
+
+
+	// *((u8 *) IOREGSEL) = offset + 1;
+	// *((u32 *) IOWIN) = (u32) (val >> 32);
+
+	// while (*((u32 *) IOWIN) != (u32) (val >> 32)) {lib_printf("w");};
+
+	// *((u8 *) IOREGSEL) = offset;
+	// *((u32 *) IOWIN) = (u32) val;
+
+	// while (*((u32 *) IOWIN) != (u32) (val)) {};
+}
+
+u64 io_apic_read_ret(u8 index)
+{
+	u8 offset = IOAPIC_RET_OFF + 2 * index;
+	volatile u64 result = 0;
+	volatile u32 *ioregsel = IOREGSEL;
+	volatile u32 *iowin = IOWIN;
+
+	*ioregsel = offset + 1;
+	result = *iowin;
+	result = result << 32;
+	*ioregsel = offset;
+	result |= *iowin;
+
+
+	return result;
 }
 
 int interrupts_dispatchIRQ(unsigned int n, cpu_context_t *ctx)
@@ -118,22 +175,37 @@ int interrupts_dispatchIRQ(unsigned int n, cpu_context_t *ctx)
 	intr_handler_t *h;
 	int reschedule = 0;
 
-	//if (n == 0)
-	//	lib_printf("IRQ: %d CPU: %x\n", n, getCpuID());
-	
 
 	if (n >= SIZE_INTERRUPTS)
 		return 0;
 
 	hal_spinlockSet(&interrupts.spinlocks[n]);
+	volatile u32 *tpr = ((u32 *) 0xFEE00080);
+	volatile u32 *apr = ((u32 *) 0xFEE00090);
+	volatile u32 *ppr = ((u32 *) 0xFEE000A0);
+	volatile u32 esp = 0;
+	u8 cpuid = getCpuID();
+
+
+	//lib_printf("IRQ: %d CPU: %x\n", n, getCpuID(), esp);
+	//*tpr = (*tpr + 1) % 8; 
+	//*tpr = 0xff;
+
+	// volatile int current_proc = (io_apic_read_ret(2) >> 56) & 0xf;
+	// io_apic_write_ret2(2, ((current_proc + 1) % 8) << 24,
+	// 					IOAPIC_DESTMOD_PHY |
+	// 					 IOAPIC_DELMOD_FIXED |
+	// 					 (32 + 0)); /* Interrupt Vector */
+
+
 
 	interrupts.counters[n]++;
 
 	if ((h = interrupts.handlers[n]) != NULL) {
-		do
+		do {
 			if (h->f(n, ctx, h->data))
 				reschedule = 1;
-		while ((h = h->next) != interrupts.handlers[n]);
+		} while ((h = h->next) != interrupts.handlers[n]);
 	}
 
 	hal_spinlockClear(&interrupts.spinlocks[n]);
@@ -192,34 +264,37 @@ __attribute__ ((section (".init"))) int _interrupts_setIDTEntry(unsigned int n, 
 	return EOK;
 }
 
+// #define IOREGSEL 0xfec00000
+// #define IOWIN 0xfec00010
+
+// #define IOAPIC_RET_OFF 0x10
+
+// #define IOAPIC_DELMOD_FIXED 0x00 << 8
+// #define IOAPIC_DELMOD_LOWEST_PRIORITY 0x01 << 8
+
+// #define IOAPIC_DESTMOD_PHY 0x0
+// #define IOAPIC_DESTMOD_LOG 0x1 << 11
+
+// #define IOAPIC_INTMASK 0x1 << 16
+
+// void io_apic_read(void)
+// {
+// 	*((u8 *) IOREGSEL) = 0;
+// 	lib_printf("io apic id: %x\n", *((u32 *) IOWIN));
+// }
+
+// u32 io_apic_version(void)
+// {
+// 	u32 version_reg = 0;
+// 	*((u8 *) IOREGSEL) = 1;
+// 	version_reg = *((u32 *) IOWIN);
+// 	lib_printf("io apic version_register: %x\n", version_reg);
+
+// 	return version_reg;
+// }
+
 #define IOREGSEL 0xfec00000
 #define IOWIN 0xfec00010
-
-#define IOAPIC_RET_OFF 0x10
-
-#define IOAPIC_DELMOD_FIXED 0x00 << 8
-#define IOAPIC_DELMOD_LOWEST_PRIORITY 0x01 << 8
-
-#define IOAPIC_DESTMOD_PHY 0x0
-#define IOAPIC_DESTMOD_LOG 0x1 << 11
-
-#define IOAPIC_INTMASK 0x1 << 16
-
-void io_apic_read(void)
-{
-	*((u8 *) IOREGSEL) = 0;
-	lib_printf("io apic id: %x\n", *((u32 *) IOWIN));
-}
-
-u32 io_apic_version(void)
-{
-	u32 version_reg = 0;
-	*((u8 *) IOREGSEL) = 1;
-	version_reg = *((u32 *) IOWIN);
-	lib_printf("io apic version_register: %x\n", version_reg);
-
-	return version_reg;
-}
 
 void io_apic_write_id(u8 id)
 {
@@ -227,52 +302,50 @@ void io_apic_write_id(u8 id)
 	*((u32 *) IOWIN) = id << 24;
 }
 
-void io_apic_write_ret(u8 index, u64 val)
-{
-	u32 offset = IOAPIC_RET_OFF + 2 * index + 1;
-	u32 higher = (u32) (val >> 32) & 0xffffffff;
-	u32 lower = (u32) val & 0xffffffff;
+// void io_apic_write_ret(u8 index, u32 higher, u32 lower)
+// {
+// 	u32 offset = IOAPIC_RET_OFF + 2 * index + 1;
 
-	lib_printf("offset: %x, higher: %x, lower: %x\n", offset, higher, lower);
-	__asm__ volatile(" \
-		movl %0, (0xfec00000); \
-		movl %1, (0xfec00010); \
-		decl %0; \
-		movl %0, (0xfec00000); \
-		movl %2, (0xfec00010);"
-		: \
-		: "r" (offset), "r" (higher), "r" (lower)\
-		:);
+// 	lib_printf("offset: %x, higher: %x, lower: %x\n", offset, higher, lower);
+// 	__asm__ volatile(" \
+// 		movl %0, (0xfec00000); \
+// 		movl %1, (0xfec00010); \
+// 		decl %0; \
+// 		movl %0, (0xfec00000); \
+// 		movl %2, (0xfec00010);"
+// 		: \
+// 		: "r" (offset), "r" (higher), "r" (lower)\
+// 		:);
 
 
-	// *((u8 *) IOREGSEL) = offset + 1;
-	// *((u32 *) IOWIN) = (u32) (val >> 32);
+// 	// *((u8 *) IOREGSEL) = offset + 1;
+// 	// *((u32 *) IOWIN) = (u32) (val >> 32);
 
-	// while (*((u32 *) IOWIN) != (u32) (val >> 32)) {lib_printf("w");};
+// 	// while (*((u32 *) IOWIN) != (u32) (val >> 32)) {lib_printf("w");};
 
-	// *((u8 *) IOREGSEL) = offset;
-	// *((u32 *) IOWIN) = (u32) val;
+// 	// *((u8 *) IOREGSEL) = offset;
+// 	// *((u32 *) IOWIN) = (u32) val;
 
-	// while (*((u32 *) IOWIN) != (u32) (val)) {};
+// 	// while (*((u32 *) IOWIN) != (u32) (val)) {};
 
-}
+// }
 
-u64 io_apic_read_ret(u8 index)
-{
-	u8 offset = IOAPIC_RET_OFF + 2 * index;
-	u32 result = 0;
+// u64 io_apic_read_ret(u8 index)
+// {
+// 	u8 offset = IOAPIC_RET_OFF + 2 * index;
+// 	u32 result = 0;
 
-	*((u8 *) IOREGSEL) = offset;
-	result = *((u32 *) IOWIN);
+// 	*((u8 *) IOREGSEL) = offset;
+// 	result = *((u32 *) IOWIN);
 
-	lib_printf("i: %d val: %08X ", index, result);
+// 	lib_printf("i: %d val: %08X ", index, result);
 
-	*((u8 *) IOREGSEL) = offset + 1;
-	result = *((u32 *) IOWIN);
-	lib_printf("%08X\n", result);
+// 	*((u8 *) IOREGSEL) = offset + 1;
+// 	result = *((u32 *) IOWIN);
+// 	lib_printf("%08X\n", result);
 
-	return result;
-}
+// 	return result;
+// }
 
 
 
@@ -320,35 +393,35 @@ __attribute__ ((section (".init"))) void _hal_interruptsInit(void)
 
 
 
-	u8 max_entry = (ver_reg >> 16) & 0xff;
-	u8 apic_ver = ver_reg & 0xff;
-	lib_printf("Max entry: %d Version: %d\n", max_entry, apic_ver);
+	// u8 max_entry = (ver_reg >> 16) & 0xff;
+	// u8 apic_ver = ver_reg & 0xff;
+	// lib_printf("Max entry: %d Version: %d\n", max_entry, apic_ver);
 
 
-	unsigned int i;
-	for (i = 0; i < 16; i++) {
-		io_apic_write_ret(i,
-						 IOAPIC_INTMASK |
-						 IOAPIC_DESTMOD_PHY |
-						 IOAPIC_DELMOD_FIXED |
-						 (32 + i)); /* Interrupt Vector */
-	}
+	// unsigned int i;
+	// for (i = 0; i < 16; i++) {
+	// 	io_apic_write_ret(i, 0,
+	// 					 IOAPIC_INTMASK |
+	// 					 IOAPIC_DESTMOD_PHY |
+	// 					 IOAPIC_DELMOD_FIXED |
+	// 					 (32 + i)); /* Interrupt Vector */
+	// }
 
-	/* Unmask clock interrupt */
-	io_apic_write_ret(2, IOAPIC_DESTMOD_PHY |
-						 IOAPIC_DELMOD_FIXED |
-						 (32 + 0)); /* Interrupt Vector */
+	// /* Unmask clock interrupt */
+	// io_apic_write_ret(2, 1 << 24, IOAPIC_DESTMOD_PHY |
+	// 					 IOAPIC_DELMOD_FIXED |
+	// 					 (32 + 0)); /* Interrupt Vector */
 
-	/* Unmask COM1 interrupt */
-	io_apic_write_ret(4, IOAPIC_DESTMOD_PHY |
-						 IOAPIC_DELMOD_FIXED |
-						 (32 + 4)); /* Interrupt Vector */
+	// /* Unmask COM1 interrupt */
+	// io_apic_write_ret(4, 1 << 24, IOAPIC_DESTMOD_PHY |
+	// 					 IOAPIC_DELMOD_FIXED |
+	// 					 (32 + 4)); /* Interrupt Vector */
 
-	io_apic_read();
+	// io_apic_read();
 
-	for (i = 0; i < 16; i++) {
-		io_apic_read_ret(i);
-	}
+	// for (i = 0; i < 16; i++) {
+	// 	io_apic_read_ret(i);
+	// }
 #endif
 
 	/* Set stubs for hardware interrupts */

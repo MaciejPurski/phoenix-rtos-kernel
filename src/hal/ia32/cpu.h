@@ -681,7 +681,16 @@ static inline u8 getCpuID(void)
 
 static inline unsigned int hal_cpuGetID(void)
 {
-	return 0;
+	u8 cpuid = 0;
+	__asm__ volatile(" \
+		movl (0xfee00020), %%eax; \
+		shrl $24, %%eax; \
+		movb %%al, %0;"
+		: "=g" (cpuid) \
+		: \
+		: "%eax");
+
+	return cpuid;
 }
 
 

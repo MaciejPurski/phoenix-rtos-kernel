@@ -48,6 +48,7 @@ static int userintr_dispatch(unsigned int n, cpu_context_t *ctx, void *arg)
 	int ret, reschedule = 0;
 	process_t *p;
 
+	//lib_printf("User interrupt dispatch\n");
 	p = (proc_current())->process;
 
 	/* Switch into the handler address space */
@@ -63,8 +64,10 @@ static int userintr_dispatch(unsigned int n, cpu_context_t *ctx, void *arg)
 	}
 
 	/* Restore process address space */
-	if ((p != NULL) && (p->mapp != NULL))
+	if ((p != NULL) && (p->mapp != NULL)) {
 		pmap_switch(&p->mapp->pmap);
+	}
+
 
 	return reschedule;
 }

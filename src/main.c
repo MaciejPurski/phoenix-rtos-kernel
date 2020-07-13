@@ -131,6 +131,62 @@ void main_initthr(void *unused)
 		proc_reap();
 }
 
+#define IOREGSEL 0xfec00000
+#define IOWIN 0xfec00010
+
+#define IOAPIC_RET_OFF 0x10
+
+#define IOAPIC_DELMOD_FIXED 0x00 << 8
+#define IOAPIC_DELMOD_LOWEST_PRIORITY 0x01 << 8
+
+#define IOAPIC_DESTMOD_PHY 0x0
+#define IOAPIC_DESTMOD_LOG 0x1 << 11
+
+#define IOAPIC_INTMASK 0x1 << 16
+
+void io_apic_read(void)
+{
+	*((u8 *) IOREGSEL) = 0;
+	lib_printf("io apic id: %x\n", *((u32 *) IOWIN));
+}
+
+u32 io_apic_version(void)
+{
+	u32 version_reg = 0;
+	*((u8 *) IOREGSEL) = 1;
+	version_reg = *((u32 *) IOWIN);
+	lib_printf("io apic version_register: %x\n", version_reg);
+
+	return version_reg;
+}
+
+void io_apic_write_ret(u8 index, u32 higher, u32 lower)
+{
+	u32 offset = IOAPIC_RET_OFF + 2 * index + 1;
+
+	lib_printf("offset: %x, higher: %x, lower: %x\n", offset, higher, lower);
+	__asm__ volatile(" \
+		movl %0, (0xfec00000); \
+		movl %1, (0xfec00010); \
+		decl %0; \
+		movl %0, (0xfec00000); \
+		movl %2, (0xfec00010);"
+		: \
+		: "r" (offset), "r" (higher), "r" (lower)\
+		:);
+
+
+	// *((u8 *) IOREGSEL) = offset + 1;
+	// *((u32 *) IOWIN) = (u32) (val >> 32);
+
+	// while (*((u32 *) IOWIN) != (u32) (val >> 32)) {lib_printf("w");};
+
+	// *((u8 *) IOREGSEL) = offset;
+	// *((u32 *) IOWIN) = (u32) val;
+
+	// while (*((u32 *) IOWIN) != (u32) (val)) {};
+
+}
 
 int main(void)
 {
@@ -158,6 +214,27 @@ int main(void)
 	*/
 
 	proc_start(main_initthr, NULL, (const char *)"init");
+
+	unsigned int i;
+	for (i = 0; i < 16; i++) {
+		io_apic_write_ret(i, 0,
+						 IOAPIC_INTMASK |
+						 IOAPIC_DESTMOD_PHY |
+						 IOAPIC_DELMOD_FIXED |
+						 (32 + i)); /* Interrupt Vector */
+	}
+
+
+
+	// // /* Unmask clock interrupt */
+	// io_apic_write_ret(2, 0 << 24, IOAPIC_DESTMOD_PHY |
+	// 					 IOAPIC_DELMOD_FIXED |
+	// 					 (32 + 0)); /* Interrupt Vector */
+
+	// // /* Unmask COM1 interrupt */
+	// io_apic_write_ret(4, 0 << 24, IOAPIC_DESTMOD_PHY |
+	// 					 IOAPIC_DELMOD_FIXED |
+	// 					 (32 + 4)); /* Interrupt Vector */
 
 	/* Start scheduling, leave current stack */
 	hal_cpuEnableInterrupts();

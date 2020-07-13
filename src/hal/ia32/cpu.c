@@ -361,9 +361,59 @@ void _cpu_initCore(void)
 {
 	cpu.ncpus++;
 
-	lib_printf("ncpus: %d cpuid: %x\n", cpu.ncpus, getCpuID());
+	u8 cpuid = getCpuID();
+
+	lib_printf("ncpus: %d cpuid: %x\n", cpu.ncpus, cpuid);
 
 	hal_memset(&cpu.tss[hal_cpuGetID()], 0, sizeof(tss_t));
+
+	u64 apic_msr = hal_rdmsr(0x1b);
+	u8 is_bsp = (apic_msr >> 8) & 1;
+	lib_printf("APIC MSR: %x\n", apic_msr);
+	lib_printf("APIC is BSP: %x\n", (apic_msr >> 8) & 1);
+	lib_printf("APIC is enabled: %x\n", (apic_msr >> 11) & 1);
+
+
+	volatile u32 spurious_reg = 0;
+	spurious_reg = *((u32 *) 0xfee000f0);
+	*((u32 *) 0xfee000f0) = 0x1ff;
+	lib_printf("LAPIC spurious reg: %x\n", *((u32 *) 0xfee000f0));
+
+	volatile u32 tpr = *((u32 *) 0xFEE00080);
+	lib_printf("LAPIC task priority reg: %x\n", tpr);
+
+	*((volatile u32 *) 0x0FEE000D0) = 1 << (cpuid + 24);
+	lib_printf("LAPIC logical address: %x\n", *((volatile u32 *) 0x0FEE000D0) & (0xff << 24));
+
+	/* Select logical destination flat model */
+	*((volatile u32 *) 0xFEE000E0) = 0xf << 28;
+	volatile u32 dfr = *((u32 *) 0xFEE000E0);
+	lib_printf("LAPIC destination format reg: %x\n", dfr);
+
+
+
+
+	volatile u32 ppr = *((u32 *) 0xFEE000A0);
+	lib_printf("Processor priority reg: %x\n", ppr);
+
+
+
+
+	/* Mask LINT0 and LINT1 */
+	if (!is_bsp) {
+		*((u32 *) 0xFEE00350) = 1 << 16;
+		*((u32 *) 0xFEE00360) = 1 << 16;
+	}
+
+	volatile u32 lvt1 = *((u32 *) 0xFEE00350);
+	lib_printf("LVT INT0: %x\n", lvt1);
+
+	volatile u32 lvt2 = *((u32 *) 0xFEE00360);
+	lib_printf("LVT INT1: %x\n", lvt1);
+
+	
+
+
 
 	_cpu_gdtInsert(4 + cpu.ncpus, (u32)&cpu.tss[hal_cpuGetID()], sizeof(tss_t), DESCR_TSS);
 
@@ -599,6 +649,83 @@ void parse_mp_table_entries(addr_t address, u16 n_entries)
 	}	
 }
 
+typedef struct {
+	char signature[4];
+	u32 length;
+	u8 revision;
+	u8 checksum;
+	char oemid[6];
+	char oem_table_id[8];
+	u32 oem_revision;
+	u32 creator_id;
+	u32 creator_revision;
+} acpi_sdt_header;
+
+typedef struct {
+	acpi_sdt_header header;
+} acpi_rsdt;
+
+typedef struct {
+	char signature[8];
+	u8 checksum;
+	char oemid[6];
+	u8 revision;
+	acpi_rsdt *rsdt;
+	u32 length;
+	u64 xsdt_address;
+	u8 extended_checksum;
+	u8 reserved[3];
+} acpi_rsdp;
+
+
+acpi_rsdp *acpi_find_rsdp()
+{
+	const char rsdp_signature[] = {'R', 'S', 'D', ' ', 'P', 'T', 'R', ' '};
+	/* Search in BIOS ROM */
+	char *current = 0x000E0000;
+	char *max_addr = 0x000FFFFF;
+
+
+	for (; current + sizeof(rsdp_signature) < max_addr; current++) {
+		if (hal_strncmp(rsdp_signature, current, sizeof(rsdp_signature)) == 0) {
+				lib_printf("FOUND: %p\n", current);
+				return (acpi_rsdp *) current;
+			}
+	}
+
+	return NULL;
+}
+
+void *acpi_read_rsdp(acpi_rsdp *rsdp)
+{
+	char sign[9] = {};
+	lib_printf("ACPI ADDR: %p\n", rsdp);
+	hal_memcpy(sign, rsdp->signature, 8);
+
+	char oemid[7] = {};
+	hal_memcpy(oemid, rsdp->oemid, 6);
+
+	/* TODO valdate checksum */
+	lib_printf("ACPI signature: %s\n", sign);
+	lib_printf("ACPI checksum: %d\n", rsdp->checksum);
+	lib_printf("ACPI oemid: %s\n", oemid);
+	lib_printf("ACPI revision: %x\n", rsdp->revision);
+	lib_printf("ACPI rsdt address: %p\n", rsdp->rsdt);
+	lib_printf("ACPI  length: %d\n", rsdp->length);
+	lib_printf("ACPI xsdt address: %x\n", rsdp->xsdt_address);
+
+}
+
+unsigned int acpi_read_rsdt(acpi_rsdt *rsdt)
+{
+	char sign[5] = {};
+	//lib_printf("RSDT ADDRESS: %p\n", rsdt);
+	//hal_memcpy(sign, rsdt->header.signature, 4);
+
+	//lib_printf("ACPI RSDT SIGNATURE: %s\n", sign);
+	//lib_printf("ACPI RSDT LENGTH: %d\n", rsdt->header.length);
+}
+
 
 char *hal_cpuInfo(char *info)
 {
@@ -634,18 +761,25 @@ char *hal_cpuInfo(char *info)
 
 	info[i] = 0;
 
-	addr_t mp_floating_table = find_mp_floating_table();
-	if (mp_floating_table) {
-		addr_t mp_table_addr = parse_mp_floating_table(mp_floating_table);
+	// addr_t mp_floating_table = find_mp_floating_table();
+	// if (mp_floating_table) {
+	// 	addr_t mp_table_addr = parse_mp_floating_table(mp_floating_table);
 
-		if (mp_table_addr) {
-			parse_mp_table_header(mp_table_addr);
+	// 	if (mp_table_addr) {
+	// 		parse_mp_table_header(mp_table_addr);
 
-			parse_mp_table_entries(mp_table_addr + sizeof(mp_table_header),
-								   mp_table_header.entry_count);
-		}
+	// 		parse_mp_table_entries(mp_table_addr + sizeof(mp_table_header),
+	// 							   mp_table_header.entry_count);
+	// 	}
 		
-	}
+	// }
+
+
+	acpi_rsdp *rsdp = acpi_find_rsdp();
+
+	acpi_read_rsdp(rsdp);
+	acpi_read_rsdt(rsdp->rsdt);
+
 
 	return info;
 }
