@@ -19,6 +19,7 @@
 #include "syspage.h"
 #include "cpu.h"
 #include "pmap.h"
+#include "apic.h"
 
 #include "../../proc/userintr.h"
 
@@ -42,6 +43,8 @@ extern void _interrupts_irq12(void);
 extern void _interrupts_irq13(void);
 extern void _interrupts_irq14(void);
 extern void _interrupts_irq15(void);
+
+extern void _interrupts_irq_local_timer(void);
 
 extern void _interrupts_unexpected(void);
 
@@ -121,6 +124,7 @@ int interrupts_dispatchIRQ(unsigned int n, cpu_context_t *ctx)
 	if (n >= SIZE_INTERRUPTS)
 		return 0;
 
+	
 	hal_spinlockSet(&interrupts.spinlocks[n]);
 
 	interrupts.counters[n]++;
@@ -134,7 +138,7 @@ int interrupts_dispatchIRQ(unsigned int n, cpu_context_t *ctx)
 
 	hal_spinlockClear(&interrupts.spinlocks[n]);
 
-	if (n == 0)
+	if (n == APIC_TIMER_INT)
 		return 0;
 	return reschedule;
 }
@@ -203,6 +207,12 @@ __attribute__ ((section (".init"))) void _hal_interruptsInit(void)
 	hal_outb((void *)0xa1, 0x28);  /* ICW2 (Slave) */
 	hal_outb((void *)0xa1, 0x02);  /* ICW3 (Slave) */
 	hal_outb((void *)0xa1, 0x01);  /* ICW4 (Slave) */
+
+
+	// /* Disable interrupts */
+	// hal_outb((void *) 0xa1, 0xff);
+	// hal_outb((void *) 0x21, 0xff);
+
 
 	/* Set stubs for hardware interrupts */
 	_interrupts_setIDTEntry(32 + 0,  _interrupts_irq0, IGBITS_IRQEXC);

@@ -173,12 +173,13 @@ int main(void)
 	hal_consolePrint(ATTR_BOLD, "Phoenix-RTOS microkernel v. " VERSION "\n");
 	lib_printf("hal: %s\n", hal_cpuInfo(s));
 	lib_printf("hal: %s\n", hal_cpuFeatures(s, sizeof(s)));
-
+		
 	_vm_init(&main_common.kmap, &main_common.kernel);
 	_proc_init(&main_common.kmap, &main_common.kernel);
 	_syscalls_init();
 
 	/* Start tests */
+
 
 	/*
 	test_proc_threads1();
@@ -190,7 +191,7 @@ int main(void)
 	*/
 
 	proc_start(main_initthr, NULL, (const char *)"init");
-
+	
 	/* Start scheduling, leave current stack */
 	hal_cpuEnableInterrupts();
 	hal_cpuReschedule(NULL);

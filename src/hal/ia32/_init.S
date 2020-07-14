@@ -343,8 +343,10 @@ _init_core_wait:
 	/* Signal spinlock */
 	xorl %eax, %eax
 	xchg (%ebx), %eax
+
 	sti
 _init_core_stop:
+
 	hlt
 	jmp _init_core_stop
 

@@ -708,6 +708,7 @@ static inline void hal_wdgReload(void)
 
 
 extern void _hal_cpuInit(void);
+extern void lapic_setup(void);
 
 
 #endif

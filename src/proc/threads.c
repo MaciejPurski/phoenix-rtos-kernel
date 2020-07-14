@@ -23,6 +23,7 @@
 #include "resource.h"
 #include "msg.h"
 #include "ports.h"
+#include "hal/ia32/cpu.h"
 
 
 struct {
@@ -1673,7 +1674,7 @@ int _threads_init(vm_map_t *kmap, vm_object_t *kernel)
 	threads_common.scheduleHandler.n = HPTIMER_IRQ;
 #else
 	threads_common.timeintrHandler.n = SYSTICK_IRQ;
-	threads_common.scheduleHandler.n = SYSTICK_IRQ;
+	threads_common.scheduleHandler.n = 15;
 #endif
 
 	hal_interruptsSetHandler(&threads_common.timeintrHandler);
