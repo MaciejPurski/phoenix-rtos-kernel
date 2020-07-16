@@ -187,7 +187,7 @@ int interrupts_dispatchIRQ(unsigned int n, cpu_context_t *ctx)
 	u8 cpuid = getCpuID();
 
 
-	//lib_printf("IRQ: %d CPU: %x\n", n, getCpuID(), esp);
+	lib_printf("IRQ: %d CPU: %x\n", n, getCpuID(), esp);
 	//*tpr = (*tpr + 1) % 8; 
 	//*tpr = 0xff;
 

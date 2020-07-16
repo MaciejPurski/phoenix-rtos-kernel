@@ -188,6 +188,84 @@ void io_apic_write_ret(u8 index, u32 higher, u32 lower)
 
 }
 
+
+typedef struct {
+	char signature[4];
+	u32 length;
+	u8 revision;
+	u8 checksum;
+	char oemid[6];
+	char oem_table_id[8];
+	u32 oem_revision;
+	u32 creator_id;
+	u32 creator_revision;
+} acpi_sdt_header;
+
+typedef struct {
+	acpi_sdt_header header;
+} acpi_rsdt;
+
+typedef struct {
+	char signature[8];
+	u8 checksum;
+	char oemid[6];
+	u8 revision;
+	acpi_rsdt *rsdt;
+	u32 length;
+	u64 xsdt_address;
+	u8 extended_checksum;
+	u8 reserved[3];
+} acpi_rsdp;
+
+
+acpi_rsdp *acpi_find_rsdp()
+{
+	const char rsdp_signature[] = {'R', 'S', 'D', ' ', 'P', 'T', 'R', ' '};
+	/* Search in BIOS ROM */
+	char *current = 0x000E0000;
+	char *max_addr = 0x000FFFFF;
+
+
+	for (; current + sizeof(rsdp_signature) < max_addr; current++) {
+		if (hal_strncmp(rsdp_signature, current, sizeof(rsdp_signature)) == 0) {
+				lib_printf("FOUND: %p\n", current);
+				return (acpi_rsdp *) current;
+			}
+	}
+
+	return NULL;
+}
+
+void *acpi_read_rsdp(acpi_rsdp *rsdp)
+{
+	char sign[9] = {};
+	lib_printf("ACPI ADDR: %p\n", rsdp);
+	hal_memcpy(sign, rsdp->signature, 8);
+
+	char oemid[7] = {};
+	hal_memcpy(oemid, rsdp->oemid, 6);
+
+	/* TODO valdate checksum */
+	lib_printf("ACPI signature: %s\n", sign);
+	lib_printf("ACPI checksum: %d\n", rsdp->checksum);
+	lib_printf("ACPI oemid: %s\n", oemid);
+	lib_printf("ACPI revision: %x\n", rsdp->revision);
+	lib_printf("ACPI rsdt address: %p\n", rsdp->rsdt);
+	lib_printf("ACPI  length: %d\n", rsdp->length);
+	lib_printf("ACPI xsdt address: %x\n", rsdp->xsdt_address);
+
+}
+
+unsigned int acpi_read_rsdt(acpi_rsdt *rsdt)
+{
+	char sign[5] = {};
+	lib_printf("RSDT ADDRESS: %p\n", rsdt);
+	hal_memcpy(sign, rsdt->header.signature, 4);
+
+	lib_printf("ACPI RSDT SIGNATURE: %s\n", sign);
+	lib_printf("ACPI RSDT LENGTH: %d\n", rsdt->header.length);
+}
+
 int main(void)
 {
 	char s[128];
@@ -198,10 +276,17 @@ int main(void)
 	lib_printf("hal: %s\n", hal_cpuInfo(s));
 	lib_printf("hal: %s\n", hal_cpuFeatures(s, sizeof(s)));
 
+
+
+	acpi_rsdp *rsdp = acpi_find_rsdp();
+	acpi_read_rsdp(rsdp);
 	_vm_init(&main_common.kmap, &main_common.kernel);
 	_proc_init(&main_common.kmap, &main_common.kernel);
 	_syscalls_init();
 
+
+	vm_mmap(&main_common.kmap, NULL, )
+	acpi_read_rsdt(rsdp->rsdt);
 	/* Start tests */
 
 	/*
@@ -225,13 +310,12 @@ int main(void)
 	}
 
 
-
-	// // /* Unmask clock interrupt */
-	// io_apic_write_ret(2, 0 << 24, IOAPIC_DESTMOD_PHY |
+	/* Unmask clock interrupt */
+	// io_apic_write_ret(2, 1 << 24, IOAPIC_DESTMOD_PHY |
 	// 					 IOAPIC_DELMOD_FIXED |
 	// 					 (32 + 0)); /* Interrupt Vector */
 
-	// // /* Unmask COM1 interrupt */
+	/* Unmask COM1 interrupt */
 	// io_apic_write_ret(4, 0 << 24, IOAPIC_DESTMOD_PHY |
 	// 					 IOAPIC_DELMOD_FIXED |
 	// 					 (32 + 4)); /* Interrupt Vector */
