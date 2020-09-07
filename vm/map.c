@@ -459,7 +459,8 @@ void *_vm_mmap(vm_map_t *map, void *vaddr, page_t *p, size_t size, u8 prot, vm_o
 
 	if ((vaddr = _map_map(map, vaddr, process, size, prot, o, offs, flags, &e)) == NULL)
 		return NULL;
-
+	// if (offs == -1)
+	// 	lib_printf("After map_map\n");
 	if (p != NULL) {
 		if (prot & PROT_USER)
 			attr |= PGHD_USER;

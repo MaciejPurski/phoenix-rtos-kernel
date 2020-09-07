@@ -627,7 +627,9 @@ int threads_schedule(unsigned int n, cpu_context_t *context, void *arg)
 		for (;;);
 	}
 #endif
-
+	// if (selected->id == 7)
+	// lib_printf("Threads schedule current: %d selected: %d\n", (current != NULL) ? current->id : "NULL", 
+	// 									(selected != NULL) ? selected->id : "NULL");
 	hal_spinlockClear(&threads_common.spinlock, &sc);
 
 	return EOK;
@@ -996,6 +998,7 @@ int proc_threadSleep(unsigned long long us)
 	now = _threads_getTimer();
 
 	current = threads_common.current[hal_cpuGetID()];
+	//lib_printf("Thread %d sleep %d\n", current->id, us);
 	current->state = SLEEP;
 	current->wait = NULL;
 	current->wakeup = now + TIMER_US2CYC(us);

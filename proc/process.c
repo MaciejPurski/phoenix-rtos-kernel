@@ -371,6 +371,7 @@ int process_load32(vm_map_t *map, vm_object_t *o, offs_t base, void *iehdr)
 	unsigned i, prot, flags, misalign = 0;
 	offs_t offs;
 
+	lib_printf("Process_load32 enter\n");
 	for (i = 0, phdr = (void *)ehdr + ehdr->e_phoff; i < ehdr->e_phnum; i++, phdr++) {
 		if (phdr->p_type != PT_LOAD || phdr->p_vaddr == 0)
 			continue;
@@ -396,14 +397,24 @@ int process_load32(vm_map_t *map, vm_object_t *o, offs_t base, void *iehdr)
 		if (filesz && (prot & PROT_WRITE))
 			flags |= MAP_NEEDSCOPY;
 
+		lib_printf("%s: vm_mmap: vaddr(%x), size(%x), offset(%x)\n", __FUNCTION__, vaddr, filesz, base + offs);
 		if (filesz && vm_mmap(map, vaddr, NULL, round_page(filesz), prot, o, base + offs, flags) == NULL)
 			return -ENOMEM;
-
+		lib_printf("%s: mmap left\n", __FUNCTION__);
 		if (filesz != memsz) {
-			if (round_page(memsz) - round_page(filesz) && vm_mmap(map, vaddr, NULL, round_page(memsz) - round_page(filesz), prot, NULL, -1, MAP_NONE) == NULL)
-				return -ENOMEM;
+			lib_printf("-------------------round_page(memsz) = %d round_page(filesz) = %d------------------------\n", round_page(memsz), round_page(filesz));
+			//lib_printf("%s: vm_mmap second call: vaddr(%x), size(%x), offset(%x)\n", __FUNCTION__, vaddr, round_page(memsz) - round_page(filesz), -1);
 
+			
+			//__asm__ volatile ("cpsid if;");
+			if (round_page(memsz) - round_page(filesz)) {
+				if (vm_mmap(map, vaddr, NULL, round_page(memsz) - round_page(filesz), prot, NULL, -1, MAP_NONE) == NULL)
+					return -ENOMEM;
+			}
+			//__asm__ volatile ("cpsie if;");
+			lib_printf("%s: before memset\n", __FUNCTION__);
 			hal_memset(vaddr + filesz, 0, round_page((unsigned long)vaddr + memsz) - (unsigned long)vaddr - filesz);
+			lib_printf("%s: after memset\n", __FUNCTION__);
 		}
 	}
 
@@ -465,20 +476,22 @@ int process_load(process_t *process, vm_object_t *o, offs_t base, size_t size, v
 	Elf64_Ehdr *ehdr;
 	vm_map_t *map = process->mapp;
 	int err;
-
+	lib_printf("Process load: %x %x\n", base, size);
 	size = round_page(size);
 
 	if ((ehdr = vm_mmap(process_common.kmap, NULL, NULL, size, PROT_READ, o, base, MAP_NONE)) == NULL)
 		return -ENOMEM;
 
+	lib_printf("Memory mapped: %p\n", ehdr);
 	/* Test ELF header */
 	if (hal_strncmp((char *)ehdr->e_ident, "\177ELF", 4)) {
 		vm_munmap(process_common.kmap, ehdr, size);
 		return -ENOEXEC;
 	}
 
+	lib_printf("str compared\n");
 	*entry = (void *)(unsigned long)ehdr->e_entry;
-
+	lib_printf("Entry: %x\n", *entry);
 	err = EOK;
 	
 	switch (ehdr->e_ident[4]) {
@@ -486,6 +499,7 @@ int process_load(process_t *process, vm_object_t *o, offs_t base, size_t size, v
 	/* 32-bit binary */
 	case 1:
 		err = process_load32(map, o, base, ehdr);
+		lib_printf("Process load left\n");
 		break;
 
 	/* 64-bit binary */ 
@@ -497,6 +511,7 @@ int process_load(process_t *process, vm_object_t *o, offs_t base, size_t size, v
 	}
 	vm_munmap(process_common.kmap, ehdr, size);
 
+	lib_printf("Unmapped\n");
 	if (err < 0)
 		return err;
 
@@ -739,7 +754,7 @@ static void process_exec(thread_t *current, process_spawn_t *spawn)
 
 	current->process->argv = spawn->argv;
 	current->process->envp = spawn->envp;
-
+	lib_printf("Process exec\n");
 #ifndef NOMMU
 	vm_mapCreate(&current->process->map, (void *)(VADDR_MIN + SIZE_PAGE), (void *)VADDR_USR_MAX);
 	current->process->mapp = &current->process->map;
@@ -752,7 +767,9 @@ static void process_exec(thread_t *current, process_spawn_t *spawn)
 
 	pmap_switch(current->process->pmapp);
 
+	lib_printf("Process exec pmap_switched\n");
 	err = process_load(current->process, spawn->object, spawn->offset, spawn->size, &stack, &entry);
+	lib_printf("Process loaded\n");
 	if (!err) {
 		stack = process_putargs(stack, &spawn->envp, &count);
 		stack = process_putargs(stack, &spawn->argv, &count);
@@ -763,7 +780,7 @@ static void process_exec(thread_t *current, process_spawn_t *spawn)
 		PUTONSTACK(stack, int, count);
 		PUTONSTACK(stack, void *, NULL); /* return address */
 	}
-
+	lib_printf("Args put on stack\n");
 	if (spawn->parent == NULL) {
 		/* if execing without vfork */
 		hal_spinlockDestroy(&spawn->sl);
@@ -778,7 +795,7 @@ static void process_exec(thread_t *current, process_spawn_t *spawn)
 
 	_hal_cpuSetKernelStack(current->kstack + current->kstacksz);
 	hal_cpuSetGot(current->process->got);
-
+	lib_printf("Before hal_jmp: %x\n", err);
 	if (err < 0)
 		proc_threadEnd();
 	else
@@ -817,6 +834,7 @@ int proc_spawn(vm_object_t *object, vm_map_t *map, offs_t offset, size_t size, c
 		return -ENOMEM;
 	}
 
+	lib_printf("Spawning process: %s\n", path);
 	spawn.object = object;
 	spawn.offset = offset;
 	spawn.size = size;
@@ -831,8 +849,13 @@ int proc_spawn(vm_object_t *object, vm_map_t *map, offs_t offset, size_t size, c
 
 	if ((pid = proc_start(proc_spawnThread, &spawn, path)) > 0) {
 		hal_spinlockSet(&spawn.sl, &sc);
-		while (spawn.state == FORKING)
+		while (spawn.state == FORKING) {
+			lib_printf("proc_spawn - while loop\n");
+			//__asm__ volatile ("1: b 1b");   
 			proc_threadWait(&spawn.wq, &spawn.sl, 0, &sc);
+		}
+
+		lib_printf("Process started\n");
 		hal_spinlockClear(&spawn.sl, &sc);
 	}
 	else {

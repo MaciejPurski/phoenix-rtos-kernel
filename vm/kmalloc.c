@@ -148,6 +148,7 @@ void *vm_kmalloc(size_t size)
 	if (hdridx >= sizeof(kmalloc_common.sizes) / sizeof(vm_zone_t *))
 		return NULL;
 
+	//lib_printf("kmalloc enter\n");
 	proc_lockSet(&kmalloc_common.lock);
 
 	if (kmalloc_common.hdrblocks == 1)
@@ -161,6 +162,8 @@ void *vm_kmalloc(size_t size)
 		b = _kmalloc_alloc(hdridx, idx);
 
 	proc_lockClear(&kmalloc_common.lock);
+	//lib_printf("kmalloc leave\n");
+
 
 	return b;
 }

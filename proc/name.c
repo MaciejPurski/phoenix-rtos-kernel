@@ -136,6 +136,7 @@ int proc_portLookup(const char *name, oid_t *file, oid_t *dev)
 	oid_t srv;
 	char pstack[16], *pheap = NULL, *pptr;
 
+	//lib_printf("Lookup name: %s\n", name);
 	if (name == NULL || (file == NULL && dev == NULL))
 		return -EINVAL;
 
@@ -425,15 +426,19 @@ int proc_read(oid_t oid, size_t offs, void *buf, size_t sz, unsigned mode)
 int proc_write(oid_t oid, size_t offs, void *buf, size_t sz, unsigned mode)
 {
 	int err;
+	proc_threadSleep(500);
+	//lib_printf("proc_write %d: before kmalloc\n", proc_current()->id);
 	msg_t *msg = vm_kmalloc(sizeof(msg_t));
-
+	//lib_printf("proc_write %d: after kmalloc\n", proc_current()->id);
+	//lib_printf("proc_write: enter\n");
 	if (msg == NULL)
 		return -ENOMEM;
 
 	hal_memset(msg, 0, sizeof(msg_t));
-
+//lib_printf("proc_write: memset\n");
 	msg->type = mtWrite;
 	hal_memcpy(&msg->i.io.oid, &oid, sizeof(oid_t));
+//	lib_printf("proc_write: memcpy\n");
 	msg->i.io.offs = offs;
 	msg->i.io.len = 0;
 	msg->i.io.mode = mode;
@@ -442,11 +447,13 @@ int proc_write(oid_t oid, size_t offs, void *buf, size_t sz, unsigned mode)
 	msg->i.data = buf;
 
 	err = proc_send(oid.port, msg);
+//	lib_printf("proc_write: proc_send\n");
 
 	if (err >= 0)
 		err = msg->o.io.err;
 
 	vm_kfree(msg);
+//		lib_printf("proc_write: kfree\n");
 	return err;
 }
 

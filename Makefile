@@ -62,12 +62,10 @@ $(PREFIX_O)/programs.o.cpio: $(PREFIX_O)programs.o $(BUILD_DIR)/programs.cpio
 	@printf "EMBED programs.cpio\n"
 	$(SIL)$(OBJCOPY) --update-section .data=$(BUILD_DIR)/programs.cpio $(PREFIX_O)programs.o --add-symbol programs=.data:0 $(PREFIX_O)programs.o.cpio
 
-
 $(PREFIX_PROG)phoenix-$(TARGET).elf: $(OBJS) $(PREFIX_O)/programs.o.cpio
 	@mkdir -p $(@D)
-	@(printf "LD  %-24s\n" "$(@F)");
+	@(printf "LD  %-24s\n" "$(@F)" "$(LDFLAGS)" "-e _start --section-start .init=$(VADDR_KERNEL_INIT) -o $(PREFIX_PROG)phoenix-$(TARGET).elf $(OBJS) $(PREFIX_O)/programs.o.cpio $(GCCLIB)");
 	$(SIL)$(LD) $(LDFLAGS) -e _start --section-start .init=$(VADDR_KERNEL_INIT) -o $(PREFIX_PROG)phoenix-$(TARGET).elf $(OBJS) $(PREFIX_O)/programs.o.cpio $(GCCLIB)
-
 
 install-headers: $(EXTERNAL_HEADERS)
 	@printf "Installing kernel headers\n"

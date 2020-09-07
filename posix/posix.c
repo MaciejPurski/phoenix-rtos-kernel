@@ -657,7 +657,6 @@ int posix_write(int fildes, void *buf, size_t nbyte)
 	if (f->type == ftUnixSocket) {
 		if (status & O_NONBLOCK)
 			flags = MSG_DONTWAIT;
-
 		rcnt = unix_sendto(f->oid.id, buf, nbyte, flags, NULL, 0);
 	}
 	else {

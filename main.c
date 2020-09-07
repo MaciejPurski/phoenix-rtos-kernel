@@ -50,7 +50,7 @@ void main_initthr(void *unused)
 	lib_printf("main: Decoding programs from data segment\n");
 	programs_decode(&main_common.kmap, &main_common.kernel);
 
-	lib_printf("main: Starting syspage programs:");
+	lib_printf("main: Starting syspage programs progsz: %d:", syspage->progssz);
 	for (i = 0; i < syspage->progssz; i++)
 		lib_printf(" '%s',", syspage->progs[i].cmdline);
 	lib_printf("\b \n");
@@ -68,7 +68,7 @@ void main_initthr(void *unused)
 //	proc_fileAdd(&h, &oid, 0);
 
 	argv[0] = NULL;
-
+//__asm__ volatile ("1: b 1b");
 	while (cmdline != NULL && *cmdline != '\0') {
 		end = cmdline;
 		while (*end && *(++end) != ' ');

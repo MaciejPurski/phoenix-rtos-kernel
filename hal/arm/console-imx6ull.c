@@ -47,17 +47,17 @@ static void _console_print(const char *s)
 
 void hal_consolePrint(int attr, const char *s)
 {
-	if (attr == ATTR_BOLD) {
-		_console_print("\033[1m");
-		_console_print(s);
-		_console_print("\033[0m");
-	}
-	else if (attr != ATTR_USER) {
-		_console_print("\033[36m");
-		_console_print(s);
-		_console_print("\033[0m");
-	}
-	else
+	// if (attr == ATTR_BOLD) {
+	// 	_console_print("\033[1m");
+	// 	_console_print(s);
+	// 	_console_print("\033[0m");
+	// }
+	// else if (attr != ATTR_USER) {
+	// 	_console_print("\033[36m");
+	// 	_console_print(s);
+	// 	_console_print("\033[0m");
+	// }
+	// else
 		_console_print(s);
 }
 

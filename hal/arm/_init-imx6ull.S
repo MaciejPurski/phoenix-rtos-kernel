@@ -410,6 +410,7 @@ enet_pll:
 	ands r1, #(1 << 31)
 	beq enet_pll
 
+
 	/* Copy applications and update syspage */
 	ldr r8, =(ADDR_DDR)
 	ldr r9, =(SIZE_PAGE - 1)
@@ -421,6 +422,7 @@ enet_pll:
 	ldr r1, [r0, #0x114] /* Number of programs */
 	add r0, r0, #0x118 /* Now points to syspage->progs */
 	add r2, r8, #0x400000 /* Destination */
+
 	bic r2, r2, r6
 
 apps_copy:

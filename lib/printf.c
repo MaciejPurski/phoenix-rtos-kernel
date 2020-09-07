@@ -138,7 +138,7 @@ void lib_putch(char s)
 	c[0] = s;
 	c[1] = '\0';
 
-	hal_consolePrint(ATTR_NORMAL, c);
+	hal_consolePrint(ATTR_BOLD, c);
 }
 
 
